@@ -14,11 +14,21 @@ def api_client():
 
 
 @pytest.fixture
+def client(api_client):
+    """
+    Backward-compatible alias for the API client.
+
+    Some API tests use the fixture name `client`,
+    while newer tests use `api_client`.
+    """
+    return api_client
+
+
+@pytest.fixture
 def auth_token(api_client):
     """
     Logs in as admin and returns the authentication token.
     """
-
     response = api_client.post(
         "/api/login",
         json={
@@ -29,15 +39,14 @@ def auth_token(api_client):
 
     assert response.status_code == 200
 
-    return response.json()["token"]
+    return response.json()["access_token"]
 
 
 @pytest.fixture
 def auth_headers(auth_token):
     """
-    Returns HTTP authorization headers.
+    Returns authentication headers using the generated token.
     """
-
     return {
-        "Authorization": f"Bearer {auth_token}"
+        "Authorization": f"Bearer {auth_token}",
     }
