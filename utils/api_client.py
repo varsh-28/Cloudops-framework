@@ -1,50 +1,28 @@
-from typing import Any
+from __future__ import annotations
 
-from fastapi.testclient import TestClient
+from typing import Any
 
 
 class APIClient:
     """
-    Reusable API wrapper around FastAPI TestClient.
-
-    Generic get/post methods are intentionally exposed so existing
-    tests remain backward compatible while newer tests can use
-    higher-level methods.
+    Reusable API client wrapper around FastAPI TestClient.
     """
 
-    def __init__(self, client: TestClient):
+    def __init__(self, client):
         self.client = client
         self.token: str | None = None
+        self.username: str | None = None
 
-    # --------------------------------------------------------
-    # Generic HTTP methods
-    # --------------------------------------------------------
-
-    def get(self, *args, **kwargs):
-        return self.client.get(*args, **kwargs)
-
-    def post(self, *args, **kwargs):
-        return self.client.post(*args, **kwargs)
-
-    def put(self, *args, **kwargs):
-        return self.client.put(*args, **kwargs)
-
-    def patch(self, *args, **kwargs):
-        return self.client.patch(*args, **kwargs)
-
-    def delete(self, *args, **kwargs):
-        return self.client.delete(*args, **kwargs)
-
-    # --------------------------------------------------------
-    # Authentication
-    # --------------------------------------------------------
+    # ============================================================
+    # AUTHENTICATION
+    # ============================================================
 
     def login(
         self,
         username: str = "admin",
         password: str = "admin123",
     ):
-        response = self.post(
+        response = self.client.post(
             "/api/login",
             json={
                 "username": username,
@@ -53,7 +31,17 @@ class APIClient:
         )
 
         if response.status_code == 200:
-            self.token = response.json()["access_token"]
+            data = response.json()
+
+            self.token = (
+                data.get("access_token")
+                or data.get("token")
+            )
+
+            self.username = data.get(
+                "username",
+                username,
+            )
 
         return response
 
@@ -68,9 +56,64 @@ class APIClient:
             "Authorization": f"Bearer {self.token}"
         }
 
-    # --------------------------------------------------------
-    # Services
-    # --------------------------------------------------------
+    # ============================================================
+    # BASIC HTTP METHODS
+    # ============================================================
+
+    def get(
+        self,
+        endpoint: str,
+        *,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ):
+        return self.client.get(
+            endpoint,
+            headers=headers,
+            **kwargs,
+        )
+
+    def post(
+        self,
+        endpoint: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        return self.client.post(
+            endpoint,
+            headers=headers,
+            json=json,
+            **kwargs,
+        )
+
+    # ============================================================
+    # HEALTH
+    # ============================================================
+
+    def health(self):
+        """
+        Public application health endpoint.
+        """
+        return self.get("/health")
+
+    def service_health(self):
+        """
+        Public service health endpoint.
+
+        No authentication is required because
+        /api/services/health is intentionally public
+        in app/main.py.
+        """
+        return self.get("/api/services/health")
+
+    def get_service_health(self):
+        return self.service_health()
+
+    # ============================================================
+    # SERVICES
+    # ============================================================
 
     def get_services(self):
         return self.get(
@@ -84,37 +127,22 @@ class APIClient:
             headers=self.auth_headers,
         )
 
-    def start_service(self, service_name: str):
+    def service_action(
+        self,
+        service_name: str,
+        action: str,
+    ):
         return self.post(
             f"/api/services/{service_name}/action",
             headers=self.auth_headers,
-            json={"action": "start"},
+            json={
+                "action": action,
+            },
         )
 
-    def stop_service(self, service_name: str):
-        return self.post(
-            f"/api/services/{service_name}/action",
-            headers=self.auth_headers,
-            json={"action": "stop"},
-        )
-
-    def restart_service(self, service_name: str):
-        return self.post(
-            f"/api/services/{service_name}/action",
-            headers=self.auth_headers,
-            json={"action": "restart"},
-        )
-
-    def deploy_service_action(self, service_name: str):
-        return self.post(
-            f"/api/services/{service_name}/action",
-            headers=self.auth_headers,
-            json={"action": "deploy"},
-        )
-
-    # --------------------------------------------------------
-    # Deployment
-    # --------------------------------------------------------
+    # ============================================================
+    # DEPLOYMENT
+    # ============================================================
 
     def deploy(
         self,
@@ -142,22 +170,23 @@ class APIClient:
             headers=self.auth_headers,
         )
 
-    # --------------------------------------------------------
-    # Health
-    # --------------------------------------------------------
-
-    def health(self):
-        return self.get("/health")
-
-    def service_health(self):
-        return self.get("/api/services/health")
-
-    # --------------------------------------------------------
-    # Current user
-    # --------------------------------------------------------
+    # ============================================================
+    # CURRENT USER
+    # ============================================================
 
     def get_current_user(self):
         return self.get(
             "/api/me",
             headers=self.auth_headers,
         )
+
+    # ============================================================
+    # LOGOUT
+    # ============================================================
+
+    def logout(self):
+        """
+        Clear locally stored authentication state.
+        """
+        self.token = None
+        self.username = None
