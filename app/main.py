@@ -53,7 +53,7 @@ ACTIVE_TOKENS = {}
 
 
 # ============================================================
-# MODELS
+# REQUEST MODELS
 # ============================================================
 
 class LoginRequest(BaseModel):
@@ -75,6 +75,7 @@ class ServiceActionRequest(BaseModel):
 # ============================================================
 
 def current_timestamp():
+    """Return the current UTC timestamp in ISO-8601 format."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -114,7 +115,7 @@ def validate_token(authorization: str | None):
 
 
 # ============================================================
-# UI
+# LOGIN PAGE
 # ============================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -125,9 +126,11 @@ def root():
     <html>
 
     <head>
+
         <title>CloudOps SDET Framework</title>
 
         <style>
+
             body {
                 font-family: Arial, sans-serif;
                 background: #f4f6f8;
@@ -166,6 +169,10 @@ def root():
                 cursor: pointer;
             }
 
+            button:hover {
+                background: #1d4ed8;
+            }
+
             #login-success-message {
                 margin-top: 15px;
                 text-align: center;
@@ -177,14 +184,22 @@ def root():
                 text-align: center;
                 color: red;
             }
+
+            #dashboard-button {
+                display: none;
+            }
+
         </style>
+
     </head>
+
 
     <body>
 
         <div class="container">
 
             <h1>CloudOps Login</h1>
+
 
             <form id="login-form">
 
@@ -196,6 +211,7 @@ def root():
                     required
                 >
 
+
                 <input
                     id="password"
                     name="password"
@@ -204,15 +220,29 @@ def root():
                     required
                 >
 
-                <button type="submit">
+
+                <button
+                    type="submit"
+                >
                     Login
                 </button>
 
             </form>
 
+
             <div id="login-success-message"></div>
 
+
             <div id="login-error-message"></div>
+
+
+            <button
+                id="dashboard-button"
+                type="button"
+                onclick="window.location.href='/dashboard';"
+            >
+                Open Dashboard
+            </button>
 
         </div>
 
@@ -221,76 +251,112 @@ def root():
 
             document
                 .getElementById("login-form")
-                .addEventListener("submit", async function(event) {
+                .addEventListener(
+                    "submit",
+                    async function(event) {
 
-                    event.preventDefault();
+                        event.preventDefault();
 
-                    const username =
-                        document.getElementById("username").value;
 
-                    const password =
-                        document.getElementById("password").value;
+                        const username =
+                            document.getElementById(
+                                "username"
+                            ).value;
 
-                    const successMessage =
-                        document.getElementById(
-                            "login-success-message"
-                        );
 
-                    const errorMessage =
-                        document.getElementById(
-                            "login-error-message"
-                        );
+                        const password =
+                            document.getElementById(
+                                "password"
+                            ).value;
 
-                    successMessage.innerText = "";
-                    errorMessage.innerText = "";
 
-                    try {
+                        const successMessage =
+                            document.getElementById(
+                                "login-success-message"
+                            );
 
-                        const response = await fetch(
-                            "/api/login",
-                            {
-                                method: "POST",
 
-                                headers: {
-                                    "Content-Type": "application/json"
-                                },
+                        const errorMessage =
+                            document.getElementById(
+                                "login-error-message"
+                            );
 
-                                body: JSON.stringify({
-                                    username: username,
-                                    password: password
-                                })
+
+                        const dashboardButton =
+                            document.getElementById(
+                                "dashboard-button"
+                            );
+
+
+                        successMessage.innerText = "";
+                        errorMessage.innerText = "";
+
+                        dashboardButton.style.display = "none";
+
+
+                        try {
+
+                            const response =
+                                await fetch(
+                                    "/api/login",
+                                    {
+                                        method: "POST",
+
+                                        headers: {
+                                            "Content-Type":
+                                                "application/json"
+                                        },
+
+                                        body: JSON.stringify({
+                                            username: username,
+                                            password: password
+                                        })
+                                    }
+                                );
+
+
+                            const data =
+                                await response.json();
+
+
+                            if (response.ok) {
+
+                                successMessage.innerText =
+                                    `Login successful. Welcome ${data.username}.`;
+
+
+                                dashboardButton.style.display =
+                                    "block";
+
+                            } else {
+
+                                errorMessage.innerText =
+                                    data.detail ||
+                                    "Login failed";
+
                             }
-                        );
 
-                        const data = await response.json();
-
-                        if (response.ok) {
-
-                            successMessage.innerText =
-                                `Login successful. Welcome ${data.username}.`;
-
-                        } else {
+                        } catch (error) {
 
                             errorMessage.innerText =
-                                data.detail || "Login failed";
+                                "Unable to connect to server";
 
                         }
 
-                    } catch (error) {
-
-                        errorMessage.innerText =
-                            "Unable to connect to server";
-
                     }
-
-                });
+                );
 
         </script>
 
     </body>
+
     </html>
     """
 
+
+# ============================================================
+# DASHBOARD
+# ============================================================
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
@@ -308,31 +374,66 @@ def dashboard():
         </tr>
         """
 
+
     return f"""
     <!DOCTYPE html>
+
     <html>
 
     <head>
+
         <title>CloudOps Dashboard</title>
+
+        <style>
+
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 40px;
+            }}
+
+            table {{
+                border-collapse: collapse;
+                width: 100%;
+            }}
+
+            th,
+            td {{
+                border: 1px solid #ddd;
+                padding: 12px;
+            }}
+
+            th {{
+                background: #f2f2f2;
+            }}
+
+        </style>
+
     </head>
+
 
     <body>
 
         <h1>CloudOps Dashboard</h1>
 
-        <table border="1">
+
+        <table>
 
             <thead>
+
                 <tr>
                     <th>Service</th>
                     <th>Status</th>
                     <th>Version</th>
                     <th>Environment</th>
                 </tr>
+
             </thead>
 
+
             <tbody>
+
                 {rows}
+
             </tbody>
 
         </table>
@@ -376,21 +477,27 @@ def login(request: LoginRequest):
 
     user = USERS.get(request.username)
 
+
     if not user:
+
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password",
         )
 
+
     if user["password"] != request.password:
+
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password",
         )
+
 
     token = str(uuid4())
 
     ACTIVE_TOKENS[token] = user["username"]
+
 
     return {
         "message": "Login successful",
@@ -400,6 +507,10 @@ def login(request: LoginRequest):
         "role": user["role"],
     }
 
+
+# ============================================================
+# CURRENT USER
+# ============================================================
 
 @app.get("/api/me")
 def get_current_user(
@@ -441,14 +552,21 @@ def get_service(
 
     service = SERVICES.get(service_name)
 
+
     if not service:
+
         raise HTTPException(
             status_code=404,
             detail="Service not found",
         )
 
+
     return service
 
+
+# ============================================================
+# SERVICE ACTION
+# ============================================================
 
 @app.post("/api/services/{service_name}/action")
 def service_action(
@@ -461,11 +579,14 @@ def service_action(
 
     service = SERVICES.get(service_name)
 
+
     if not service:
+
         raise HTTPException(
             status_code=404,
             detail="Service not found",
         )
+
 
     allowed_actions = {
         "start",
@@ -473,6 +594,7 @@ def service_action(
         "restart",
         "deploy",
     }
+
 
     if request.action not in allowed_actions:
 
@@ -484,20 +606,32 @@ def service_action(
             ),
         )
 
+
     if request.action == "start":
+
         service["status"] = "running"
+
 
     elif request.action == "stop":
+
         service["status"] = "stopped"
 
+
     elif request.action == "restart":
+
         service["status"] = "running"
+
 
     elif request.action == "deploy":
+
         service["status"] = "running"
 
+
     return {
-        "message": f"{service_name} {request.action} successful",
+        "message": (
+            f"{service_name} "
+            f"{request.action} successful"
+        ),
         "service": service,
         "performed_by": user["username"],
     }
@@ -517,6 +651,7 @@ def deploy_service(
 
     service = SERVICES.get(request.service_name)
 
+
     if not service:
 
         raise HTTPException(
@@ -524,11 +659,15 @@ def deploy_service(
             detail="Service not found",
         )
 
+
     deployment_id = str(uuid4())
+
     timestamp = current_timestamp()
+
 
     service["version"] = request.version
     service["status"] = "running"
+
 
     deployment = {
         "deployment_id": deployment_id,
@@ -540,21 +679,26 @@ def deploy_service(
         "timestamp": timestamp,
     }
 
+
     DEPLOYMENTS.append(deployment)
 
-    # Return BOTH formats:
-    # 1. deployment object expected by service tests
-    # 2. flat fields expected by deployment tests
+
     return {
         "message": (
             f"Deployment of "
             f"{request.service_name} "
             f"version {request.version} successful"
         ),
+
         "deployment": deployment,
+
         **deployment,
     }
 
+
+# ============================================================
+# DEPLOYMENT HISTORY
+# ============================================================
 
 @app.get("/api/deployments")
 def get_deployments(
@@ -583,7 +727,7 @@ def deployment_history(
 
 
 # ============================================================
-# INFO
+# APPLICATION INFO
 # ============================================================
 
 @app.get("/api/info")

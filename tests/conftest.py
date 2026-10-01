@@ -1,138 +1,131 @@
+import socket
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 
 import pytest
 from fastapi.testclient import TestClient
+from playwright.sync_api import expect
 
 from app.main import app
 
 
 BASE_URL = "http://127.0.0.1:8000"
-HEALTH_URL = f"{BASE_URL}/health"
 
 
-def is_server_running():
+# ============================================================
+# SERVER MANAGEMENT
+# ============================================================
+
+def is_server_running(host="127.0.0.1", port=8000):
     """
-    Checks whether the FastAPI application is already running.
+    Check whether something is already listening on port 8000.
     """
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
     try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=2) as response:
-            return response.status == 200
-    except (urllib.error.URLError, TimeoutError, ConnectionError):
-        return False
+        sock.settimeout(0.5)
+        result = sock.connect_ex((host, port))
+        return result == 0
 
-
-def wait_for_server(timeout=15):
-    """
-    Waits until the FastAPI server becomes available.
-    """
-    start_time = time.time()
-
-    while time.time() - start_time < timeout:
-        if is_server_running():
-            return True
-
-        time.sleep(0.5)
-
-    return False
+    finally:
+        sock.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
-def application_server():
+def start_application_server():
     """
-    Automatically starts the FastAPI application for the test session.
+    Start FastAPI automatically when pytest starts.
 
-    If a server is already running on port 8000, it reuses it.
+    This fixes Playwright's:
+        ERR_CONNECTION_REFUSED
 
-    This allows UI tests to run with:
-
-        pytest -v
-
-    without manually starting Uvicorn.
+    It also works when GitHub Actions starts pytest directly.
     """
 
-    # ---------------------------------------------------------
-    # Check whether the application is already running
-    # ---------------------------------------------------------
-    if is_server_running():
-        print("\n[SERVER] Existing FastAPI server detected.")
-        print(f"[SERVER] Using {BASE_URL}")
+    process = None
+
+    # If CI/workflow already started the server,
+    # don't start another one.
+    if not is_server_running():
+
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "app.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        # Wait for FastAPI to become available.
+        for _ in range(30):
+
+            if is_server_running():
+                break
+
+            # Check whether uvicorn crashed.
+            if process.poll() is not None:
+
+                output = ""
+
+                if process.stdout:
+                    output = process.stdout.read()
+
+                pytest.fail(
+                    "FastAPI server failed to start.\n\n"
+                    f"{output}"
+                )
+
+            time.sleep(1)
+
+        else:
+
+            process.terminate()
+
+            pytest.fail(
+                "FastAPI server did not start within 30 seconds."
+            )
+
+    try:
 
         yield
 
-        return
+    finally:
 
-    # ---------------------------------------------------------
-    # Start FastAPI application
-    # ---------------------------------------------------------
-    print("\n[SERVER] Starting FastAPI application...")
+        # Only terminate the server that this fixture started.
+        if process is not None:
 
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8000",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+            process.terminate()
 
-    # ---------------------------------------------------------
-    # Wait for application to become ready
-    # ---------------------------------------------------------
-    if not wait_for_server(timeout=15):
-        process.terminate()
+            try:
+                process.wait(timeout=5)
 
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+            except subprocess.TimeoutExpired:
 
-        output, _ = process.communicate()
+                process.kill()
 
-        raise RuntimeError(
-            "FastAPI application failed to start.\n\n"
-            f"Server output:\n{output}"
-        )
 
-    print(f"[SERVER] FastAPI application started at {BASE_URL}")
-
-    # ---------------------------------------------------------
-    # Run tests
-    # ---------------------------------------------------------
-    yield
-
-    # ---------------------------------------------------------
-    # Shutdown application
-    # ---------------------------------------------------------
-    print("\n[SERVER] Stopping FastAPI application...")
-
-    process.terminate()
-
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
-
-    print("[SERVER] FastAPI application stopped.")
-
+# ============================================================
+# API CLIENT
+# ============================================================
 
 @pytest.fixture
 def api_client():
     """
-    Creates a fresh FastAPI TestClient for each API test.
+    FastAPI TestClient used by API tests.
     """
+
     with TestClient(app) as client:
+
         yield client
 
 
@@ -141,21 +134,24 @@ def client(api_client):
     """
     Backward-compatible alias.
 
-    Some API tests use `client`,
-    while others use `api_client`.
+    Some tests use:
+        client
+
+    Other tests use:
+        api_client
+
+    Both now point to the same FastAPI TestClient.
     """
+
     return api_client
 
 
+# ============================================================
+# AUTHENTICATION
+# ============================================================
+
 @pytest.fixture
 def auth_token(api_client):
-    """
-    Logs in as admin and returns the authentication token.
-
-    Supports both:
-        - access_token
-        - token
-    """
 
     response = api_client.post(
         "/api/login",
@@ -165,30 +161,43 @@ def auth_token(api_client):
         },
     )
 
-    assert response.status_code == 200, (
-        "Login failed.\n"
-        f"Status: {response.status_code}\n"
-        f"Response: {response.text}"
-    )
+    assert response.status_code == 200
 
     data = response.json()
 
-    token = data.get("access_token") or data.get("token")
-
-    assert token, (
-        "Login succeeded but no authentication token was returned.\n"
-        f"Response JSON: {data}"
-    )
-
-    return token
+    return data["token"]
 
 
 @pytest.fixture
 def auth_headers(auth_token):
-    """
-    Creates the Authorization header required
-    by protected API endpoints.
-    """
+
     return {
         "Authorization": f"Bearer {auth_token}"
     }
+
+
+# ============================================================
+# PLAYWRIGHT
+# ============================================================
+
+@pytest.fixture
+def logged_in_page(page):
+
+    page.goto("/")
+
+    page.locator("#username").fill("admin")
+
+    page.locator("#password").fill("admin123")
+
+    page.get_by_role(
+        "button",
+        name="Login",
+    ).click()
+
+    expect(
+        page.locator("#login-success-message")
+    ).to_contain_text(
+        "Login successful. Welcome admin."
+    )
+
+    return page
