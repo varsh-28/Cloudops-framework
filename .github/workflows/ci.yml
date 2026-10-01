@@ -9,69 +9,46 @@ on:
   pull_request:
     branches:
       - main
-      - master
 
 jobs:
   test:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-
-      - name: Create virtual environment
-        run: |
-          python -m venv .venv
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
-          source .venv/bin/activate
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright browsers
-        run: |
-          source .venv/bin/activate
           playwright install --with-deps chromium
-
-      - name: Run API tests
-        run: |
-          source .venv/bin/activate
-          pytest tests/api -v
 
       - name: Start application
         run: |
-          source .venv/bin/activate
-          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > app.log 2>&1 &
+          sleep 5
 
-      - name: Wait for application
+      - name: Run API and UI tests
         run: |
-          for i in {1..30}; do
-            if curl -s http://127.0.0.1:8000/health > /dev/null; then
-              echo "Application is ready"
-              exit 0
-            fi
+          mkdir -p reports
+          pytest -v \
+            --html=reports/report.html \
+            --self-contained-html \
+            --junitxml=reports/junit.xml
 
-            echo "Waiting for application..."
-            sleep 2
-          done
-
-          echo "Application failed to start"
-          cat app.log
-          exit 1
-
-      - name: Run UI tests
-        run: |
-          source .venv/bin/activate
-          pytest tests/ui -v
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-reports
+          path: reports/
+          if-no-files-found: warn
 
       - name: Upload application log
         if: always()
@@ -79,3 +56,4 @@ jobs:
         with:
           name: application-log
           path: app.log
+          if-no-files-found: warn
