@@ -2,5 +2,6 @@ fastapi
 uvicorn
 pytest
 pytest-playwright
-httpx
+pytest-base-url
 pytest-html
+httpx
