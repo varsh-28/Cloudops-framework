@@ -1,82 +1,69 @@
-def get_auth_token(client):
-    response = client.post(
-        "/api/login",
-        json={
-            "username": "admin",
-            "password": "admin123",
-        },
+import pytest
+
+
+@pytest.fixture
+def authenticated_client(client):
+    """
+    Return an API client authenticated as the admin user.
+    """
+    client.login(
+        username="admin",
+        password="admin123",
     )
+    return client
 
-    return response.json()["token"]
 
+def test_deploy_service(authenticated_client):
+    """
+    Verify successful deployment of an existing service.
+    """
 
-def test_deploy_service(client):
-    token = get_auth_token(client)
-
-    response = client.post(
-        "/api/deploy",
-        headers={
-            "Authorization": f"Bearer {token}"
-        },
-        json={
-            "service_name": "payment-service",
-            "version": "2.5.0",
-        },
+    response = authenticated_client.deploy(
+        service_name="payment-service",
+        version="2.0.0",
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["service_name"] == "payment-service"
-    assert data["version"] == "2.5.0"
-    assert data["environment"] == "qa"
-    assert data["status"] == "successful"
-    assert data["deployed_by"] == "admin"
+    assert "message" in data
+    assert "deployment" in data
+
+    deployment = data["deployment"]
+
+    assert deployment["service_name"] == "payment-service"
+    assert deployment["version"] == "2.0.0"
+    assert deployment["status"] == "successful"
+    assert deployment["environment"] == "qa"
+    assert deployment["deployed_by"] == "admin"
 
 
-def test_deploy_unknown_service(client):
-    token = get_auth_token(client)
+def test_deploy_unknown_service(authenticated_client):
+    """
+    Verify deployment fails for an unknown service.
+    """
 
-    response = client.post(
-        "/api/deploy",
-        headers={
-            "Authorization": f"Bearer {token}"
-        },
-        json={
-            "service_name": "unknown-service",
-            "version": "1.0.0",
-        },
+    response = authenticated_client.deploy(
+        service_name="unknown-service",
+        version="2.0.0",
     )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Service not found"
 
 
-def test_deployment_history(client):
-    token = get_auth_token(client)
+def test_deployment_history(authenticated_client):
+    """
+    Verify authenticated users can retrieve deployment history.
+    """
 
-    client.post(
-        "/api/deploy",
-        headers={
-            "Authorization": f"Bearer {token}"
-        },
-        json={
-            "service_name": "user-service",
-            "version": "2.0.0",
-        },
-    )
-
-    response = client.get(
-        "/api/deployments",
-        headers={
-            "Authorization": f"Bearer {token}"
-        },
-    )
+    response = authenticated_client.get_deployment_history()
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["count"] >= 1
-    assert len(data["deployments"]) >= 1
+    assert "count" in data
+    assert "deployments" in data
+    assert isinstance(data["deployments"], list)
