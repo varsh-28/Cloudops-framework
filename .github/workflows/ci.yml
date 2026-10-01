@@ -4,109 +4,52 @@ on:
   push:
     branches:
       - main
-      - master
   pull_request:
     branches:
       - main
-      - master
 
 jobs:
-
   test:
-
     runs-on: ubuntu-latest
 
     steps:
-
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
-
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-html pytest-metadata pytest-playwright
-          python -m playwright install --with-deps chromium
+          playwright install --with-deps chromium
 
-
-      - name: Start FastAPI application
+      - name: Start application
         run: |
-          nohup uvicorn app.main:app \
-            --host 127.0.0.1 \
-            --port 8000 \
-            > server.log 2>&1 &
-
-          echo $! > server.pid
-
-
-      - name: Wait for application
-        run: |
-          python - <<'PY'
-          import time
-          import urllib.request
-          import sys
-
-          url = "http://127.0.0.1:8000/"
-
-          for attempt in range(30):
-              try:
-                  response = urllib.request.urlopen(url, timeout=2)
-
-                  if response.status == 200:
-                      print("Application is ready.")
-                      sys.exit(0)
-
-              except Exception as error:
-                  print(
-                      f"Waiting for application... "
-                      f"attempt {attempt + 1}/30: {error}"
-                  )
-
-              time.sleep(1)
-
-          print("Application failed to start.")
-          sys.exit(1)
-          PY
-
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > app.log 2>&1 &
+          sleep 3
 
       - name: Run tests
         run: |
           mkdir -p reports
-
           pytest -v \
+            --junitxml=reports/junit.xml \
             --html=reports/report.html \
-            --self-contained-html \
-            --junitxml=reports/junit.xml
-
-
-      - name: Show server logs if tests fail
-        if: failure()
-        run: |
-          echo "================ SERVER LOG ================"
-          cat server.log || true
-
-          echo "================ PROCESSES ================"
-          ps aux | grep uvicorn || true
-
+            --self-contained-html
 
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: pytest-reports
           path: reports/
 
-
-      - name: Upload server logs
-        if: failure()
+      - name: Upload application logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: server-logs
-          path: server.log
+          name: application-logs
+          path: app.log
