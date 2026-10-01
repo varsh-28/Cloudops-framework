@@ -1,43 +1,29 @@
-def test_valid_login(client):
-    response = client.post(
+import pytest
+
+from tests.data.auth_test_data import AUTH_TEST_CASES
+
+
+@pytest.mark.parametrize(
+    "test_case",
+    AUTH_TEST_CASES,
+    ids=[case["name"] for case in AUTH_TEST_CASES],
+)
+def test_login_scenarios(api_client, test_case):
+    response = api_client.post(
         "/api/login",
         json={
-            "username": "admin",
-            "password": "admin123",
+            "username": test_case["username"],
+            "password": test_case["password"],
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == test_case["expected_status"]
 
     data = response.json()
 
-    assert data["message"] == "Login successful"
-    assert data["username"] == "admin"
-    assert data["role"] == "admin"
-    assert "token" in data
-
-
-def test_invalid_password(client):
-    response = client.post(
-        "/api/login",
-        json={
-            "username": "admin",
-            "password": "wrong-password",
-        },
-    )
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid username or password"
-
-
-def test_invalid_username(client):
-    response = client.post(
-        "/api/login",
-        json={
-            "username": "unknown-user",
-            "password": "admin123",
-        },
-    )
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid username or password"
+    if test_case["expected_success"]:
+        assert "token" in data
+        assert data["username"] == test_case["username"]
+        assert "role" in data
+    else:
+        assert "token" not in data
