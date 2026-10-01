@@ -14,7 +14,7 @@ app = FastAPI(
 
 
 # ============================================================
-# IN-MEMORY DATA
+# DATA
 # ============================================================
 
 USERS = {
@@ -49,13 +49,11 @@ SERVICES = {
 
 
 DEPLOYMENTS = []
-
-# token -> username
 ACTIVE_TOKENS = {}
 
 
 # ============================================================
-# PYDANTIC MODELS
+# MODELS
 # ============================================================
 
 class LoginRequest(BaseModel):
@@ -77,16 +75,10 @@ class ServiceActionRequest(BaseModel):
 # ============================================================
 
 def current_timestamp():
-    """
-    Return the current UTC timestamp in ISO-8601 format.
-    """
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def validate_token(authorization: str | None):
-    """
-    Validate a Bearer token and return the authenticated user.
-    """
 
     if not authorization:
         raise HTTPException(
@@ -101,12 +93,6 @@ def validate_token(authorization: str | None):
         )
 
     token = authorization.replace("Bearer ", "", 1).strip()
-
-    if not token:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication token",
-        )
 
     username = ACTIVE_TOKENS.get(token)
 
@@ -128,20 +114,19 @@ def validate_token(authorization: str | None):
 
 
 # ============================================================
-# ROOT / UI
+# UI
 # ============================================================
 
 @app.get("/", response_class=HTMLResponse)
 def root():
-    """
-    Simple login page used by Playwright UI tests.
-    """
 
     return """
     <!DOCTYPE html>
     <html>
+
     <head>
         <title>CloudOps SDET Framework</title>
+
         <style>
             body {
                 font-family: Arial, sans-serif;
@@ -161,7 +146,6 @@ def root():
 
             h1 {
                 text-align: center;
-                color: #222;
             }
 
             input {
@@ -182,13 +166,16 @@ def root():
                 cursor: pointer;
             }
 
-            button:hover {
-                background: #1d4ed8;
-            }
-
-            #message {
+            #login-success-message {
                 margin-top: 15px;
                 text-align: center;
+                color: green;
+            }
+
+            #login-error-message {
+                margin-top: 15px;
+                text-align: center;
+                color: red;
             }
         </style>
     </head>
@@ -223,7 +210,9 @@ def root():
 
             </form>
 
-            <div id="message"></div>
+            <div id="login-success-message"></div>
+
+            <div id="login-error-message"></div>
 
         </div>
 
@@ -242,39 +231,56 @@ def root():
                     const password =
                         document.getElementById("password").value;
 
-                    const response = await fetch("/api/login", {
+                    const successMessage =
+                        document.getElementById(
+                            "login-success-message"
+                        );
 
-                        method: "POST",
+                    const errorMessage =
+                        document.getElementById(
+                            "login-error-message"
+                        );
 
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
+                    successMessage.innerText = "";
+                    errorMessage.innerText = "";
 
-                        body: JSON.stringify({
-                            username: username,
-                            password: password
-                        })
+                    try {
 
-                    });
+                        const response = await fetch(
+                            "/api/login",
+                            {
+                                method: "POST",
 
-                    const data = await response.json();
+                                headers: {
+                                    "Content-Type": "application/json"
+                                },
 
-                    const message =
-                        document.getElementById("message");
+                                body: JSON.stringify({
+                                    username: username,
+                                    password: password
+                                })
+                            }
+                        );
 
-                    if (response.ok) {
+                        const data = await response.json();
 
-                        message.innerText =
-                            "Login successful";
+                        if (response.ok) {
 
-                        message.style.color = "green";
+                            successMessage.innerText =
+                                `Login successful. Welcome ${data.username}.`;
 
-                    } else {
+                        } else {
 
-                        message.innerText =
-                            data.detail || "Login failed";
+                            errorMessage.innerText =
+                                data.detail || "Login failed";
 
-                        message.style.color = "red";
+                        }
+
+                    } catch (error) {
+
+                        errorMessage.innerText =
+                            "Unable to connect to server";
+
                     }
 
                 });
@@ -288,15 +294,12 @@ def root():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    """
-    Simple dashboard endpoint.
-    """
 
-    service_rows = ""
+    rows = ""
 
     for service in SERVICES.values():
 
-        service_rows += f"""
+        rows += f"""
         <tr>
             <td>{service["name"]}</td>
             <td>{service["status"]}</td>
@@ -308,35 +311,16 @@ def dashboard():
     return f"""
     <!DOCTYPE html>
     <html>
+
     <head>
         <title>CloudOps Dashboard</title>
-        <style>
-            body {{
-                font-family: Arial, sans-serif;
-                margin: 40px;
-            }}
-
-            table {{
-                border-collapse: collapse;
-                width: 100%;
-            }}
-
-            th, td {{
-                border: 1px solid #ddd;
-                padding: 12px;
-            }}
-
-            th {{
-                background: #f2f2f2;
-            }}
-        </style>
     </head>
 
     <body>
 
         <h1>CloudOps Dashboard</h1>
 
-        <table>
+        <table border="1">
 
             <thead>
                 <tr>
@@ -348,12 +332,13 @@ def dashboard():
             </thead>
 
             <tbody>
-                {service_rows}
+                {rows}
             </tbody>
 
         </table>
 
     </body>
+
     </html>
     """
 
@@ -364,14 +349,21 @@ def dashboard():
 
 @app.get("/health")
 def health():
-    """
-    Application health endpoint.
-    """
 
     return {
         "status": "healthy",
         "service": "cloudops-service",
         "timestamp": current_timestamp(),
+    }
+
+
+@app.get("/api/services/health")
+def service_health():
+
+    return {
+        "status": "healthy",
+        "service": "cloudops-service",
+        "services": len(SERVICES),
     }
 
 
@@ -385,14 +377,12 @@ def login(request: LoginRequest):
     user = USERS.get(request.username)
 
     if not user:
-
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password",
         )
 
     if user["password"] != request.password:
-
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password",
@@ -411,10 +401,6 @@ def login(request: LoginRequest):
     }
 
 
-# ============================================================
-# CURRENT USER
-# ============================================================
-
 @app.get("/api/me")
 def get_current_user(
     authorization: str | None = Header(default=None),
@@ -429,21 +415,7 @@ def get_current_user(
 
 
 # ============================================================
-# SERVICE HEALTH
-# ============================================================
-
-@app.get("/api/services/health")
-def service_health():
-
-    return {
-        "status": "healthy",
-        "service": "cloudops-service",
-        "services": len(SERVICES),
-    }
-
-
-# ============================================================
-# GET ALL SERVICES
+# SERVICES
 # ============================================================
 
 @app.get("/api/services")
@@ -459,10 +431,6 @@ def get_all_services(
     }
 
 
-# ============================================================
-# GET INDIVIDUAL SERVICE
-# ============================================================
-
 @app.get("/api/services/{service_name}")
 def get_service(
     service_name: str,
@@ -474,18 +442,13 @@ def get_service(
     service = SERVICES.get(service_name)
 
     if not service:
-
         raise HTTPException(
             status_code=404,
-            detail=f"Service '{service_name}' not found",
+            detail="Service not found",
         )
 
     return service
 
-
-# ============================================================
-# SERVICE ACTION
-# ============================================================
 
 @app.post("/api/services/{service_name}/action")
 def service_action(
@@ -499,10 +462,9 @@ def service_action(
     service = SERVICES.get(service_name)
 
     if not service:
-
         raise HTTPException(
             status_code=404,
-            detail=f"Service '{service_name}' not found",
+            detail="Service not found",
         )
 
     allowed_actions = {
@@ -523,33 +485,26 @@ def service_action(
         )
 
     if request.action == "start":
-
         service["status"] = "running"
 
     elif request.action == "stop":
-
         service["status"] = "stopped"
 
     elif request.action == "restart":
-
         service["status"] = "running"
 
     elif request.action == "deploy":
-
         service["status"] = "running"
 
     return {
-        "message": (
-            f"{service_name} "
-            f"{request.action} successful"
-        ),
+        "message": f"{service_name} {request.action} successful",
         "service": service,
         "performed_by": user["username"],
     }
 
 
 # ============================================================
-# DEPLOY SERVICE
+# DEPLOYMENT
 # ============================================================
 
 @app.post("/api/deploy")
@@ -566,14 +521,12 @@ def deploy_service(
 
         raise HTTPException(
             status_code=404,
-            detail=f"Service '{request.service_name}' not found",
+            detail="Service not found",
         )
 
     deployment_id = str(uuid4())
-
     timestamp = current_timestamp()
 
-    # Update service state
     service["version"] = request.version
     service["status"] = "running"
 
@@ -589,22 +542,19 @@ def deploy_service(
 
     DEPLOYMENTS.append(deployment)
 
-    # IMPORTANT:
-    # The test suite expects the deployment response
-    # to contain a "message" field.
+    # Return BOTH formats:
+    # 1. deployment object expected by service tests
+    # 2. flat fields expected by deployment tests
     return {
         "message": (
             f"Deployment of "
             f"{request.service_name} "
             f"version {request.version} successful"
         ),
+        "deployment": deployment,
         **deployment,
     }
 
-
-# ============================================================
-# DEPLOYMENT HISTORY
-# ============================================================
 
 @app.get("/api/deployments")
 def get_deployments(
@@ -633,7 +583,7 @@ def deployment_history(
 
 
 # ============================================================
-# APPLICATION INFO
+# INFO
 # ============================================================
 
 @app.get("/api/info")
