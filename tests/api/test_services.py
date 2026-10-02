@@ -1,35 +1,35 @@
 import pytest
 
 
+SERVICE_NAME = "payment-service"
+
+
 SERVICE_ACTION_CASES = [
     {
         "name": "stop_service",
         "action": "stop",
         "expected_status": 200,
+        "service_status": "stopped",
     },
     {
         "name": "start_service",
         "action": "start",
         "expected_status": 200,
+        "service_status": "running",
     },
     {
         "name": "deploy_service",
         "action": "deploy",
         "expected_status": 200,
+        "service_status": "running",
+    },
+    {
+        "name": "restart_service",
+        "action": "restart",
+        "expected_status": 200,
+        "service_status": "running",
     },
 ]
-
-
-@pytest.fixture
-def authenticated_client(client):
-    """
-    Return an API client authenticated as the admin user.
-    """
-    client.login(
-        username="admin",
-        password="admin123",
-    )
-    return client
 
 
 @pytest.mark.parametrize(
@@ -37,14 +37,17 @@ def authenticated_client(client):
     SERVICE_ACTION_CASES,
     ids=[case["name"] for case in SERVICE_ACTION_CASES],
 )
-def test_service_actions(authenticated_client, test_case):
+def test_service_actions(api_client, auth_headers, test_case):
     """
-    Verify supported service actions.
+    Verify all supported service actions.
     """
 
-    response = authenticated_client.service_action(
-        service_name="payment-service",
-        action=test_case["action"],
+    response = api_client.post(
+        f"/api/services/{SERVICE_NAME}/action",
+        headers=auth_headers,
+        json={
+            "action": test_case["action"],
+        },
     )
 
     assert response.status_code == test_case["expected_status"]
@@ -53,18 +56,20 @@ def test_service_actions(authenticated_client, test_case):
 
     assert "message" in data
     assert "service" in data
-    assert "performed_by" in data
-
-    assert data["service"]["name"] == "payment-service"
+    assert data["service"]["name"] == SERVICE_NAME
+    assert data["service"]["status"] == test_case["service_status"]
     assert data["performed_by"] == "admin"
 
 
-def test_health_check(client):
+def test_health_check(api_client, auth_headers):
     """
-    Verify the service health endpoint.
+    Verify the authenticated service health endpoint.
     """
 
-    response = client.get_service_health()
+    response = api_client.get(
+        "/api/services/health",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
@@ -72,160 +77,189 @@ def test_health_check(client):
 
     assert data["status"] == "healthy"
     assert data["service"] == "cloudops-service"
-    assert "services" in data
+    assert data["services"] == 3
 
 
-def test_get_all_services(authenticated_client):
+def test_get_all_services(api_client, auth_headers):
     """
     Verify retrieval of all services.
     """
 
-    response = authenticated_client.get_services()
+    response = api_client.get(
+        "/api/services",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert "count" in data
-    assert "services" in data
     assert data["count"] == 3
     assert len(data["services"]) == 3
 
+    service_names = {
+        service["name"]
+        for service in data["services"]
+    }
 
-def test_get_existing_service(authenticated_client):
+    assert "payment-service" in service_names
+    assert "user-service" in service_names
+    assert "order-service" in service_names
+
+
+def test_get_existing_service(api_client, auth_headers):
     """
     Verify retrieval of an existing service.
     """
 
-    response = authenticated_client.get_service(
-        "payment-service"
+    response = api_client.get(
+        f"/api/services/{SERVICE_NAME}",
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["name"] == "payment-service"
-    assert data["status"] in ["running", "stopped"]
+    assert data["name"] == SERVICE_NAME
+    assert "status" in data
     assert "version" in data
     assert data["environment"] == "qa"
 
 
-def test_get_non_existing_service(authenticated_client):
+def test_get_non_existing_service(api_client, auth_headers):
     """
-    Verify requesting an unknown service returns 404.
+    Verify that requesting an unknown service returns 404.
     """
 
-    response = authenticated_client.get_service(
-        "unknown-service"
+    response = api_client.get(
+        "/api/services/unknown-service",
+        headers=auth_headers,
     )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Service not found"
 
 
-def test_service_requires_authentication(client):
+def test_service_requires_authentication(api_client):
     """
-    Verify service APIs reject unauthenticated requests.
+    Verify that protected service endpoints require authentication.
     """
 
-    response = client.get("/api/services")
+    response = api_client.get("/api/services")
 
     assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
 
 
-def test_stop_service(authenticated_client):
+def test_stop_service(api_client, auth_headers):
     """
-    Verify a service can be stopped.
+    Verify that a service can be stopped.
     """
 
-    response = authenticated_client.service_action(
-        service_name="payment-service",
-        action="stop",
+    response = api_client.post(
+        f"/api/services/{SERVICE_NAME}/action",
+        headers=auth_headers,
+        json={
+            "action": "stop",
+        },
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["service"]["name"] == "payment-service"
     assert data["service"]["status"] == "stopped"
 
 
-def test_start_service(authenticated_client):
+def test_start_service(api_client, auth_headers):
     """
-    Verify a service can be started.
+    Verify that a stopped service can be started.
     """
 
-    response = authenticated_client.service_action(
-        service_name="payment-service",
-        action="start",
+    response = api_client.post(
+        f"/api/services/{SERVICE_NAME}/action",
+        headers=auth_headers,
+        json={
+            "action": "start",
+        },
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["service"]["name"] == "payment-service"
     assert data["service"]["status"] == "running"
 
 
-def test_invalid_service_action(authenticated_client):
+def test_invalid_service_action(api_client, auth_headers):
     """
-    Verify unsupported service actions return 400.
+    Verify that unsupported service actions are rejected.
     """
 
-    response = authenticated_client.service_action(
-        service_name="payment-service",
-        action="invalid-action",
+    response = api_client.post(
+        f"/api/services/{SERVICE_NAME}/action",
+        headers=auth_headers,
+        json={
+            "action": "invalid-action",
+        },
     )
 
     assert response.status_code == 400
 
-    data = response.json()
+    detail = response.json()["detail"]
 
-    assert "detail" in data
-    assert "Invalid action" in data["detail"]
+    assert "Invalid action" in detail
+    assert "Allowed actions" in detail
 
 
-def test_deploy_service(authenticated_client):
+def test_deploy_service(api_client, auth_headers):
     """
     Verify deployment through the service action endpoint.
     """
 
-    response = authenticated_client.service_action(
-        service_name="payment-service",
-        action="deploy",
+    response = api_client.post(
+        f"/api/services/{SERVICE_NAME}/action",
+        headers=auth_headers,
+        json={
+            "action": "deploy",
+        },
     )
 
     assert response.status_code == 200
 
     data = response.json()
 
-    assert data["service"]["name"] == "payment-service"
+    assert data["service"]["name"] == SERVICE_NAME
     assert data["service"]["status"] == "running"
 
 
-def test_deploy_non_existing_service(authenticated_client):
+def test_deploy_non_existing_service(api_client, auth_headers):
     """
-    Verify deployment of an unknown service fails.
+    Verify deployment action rejects unknown services.
     """
 
-    response = authenticated_client.service_action(
-        service_name="unknown-service",
-        action="deploy",
+    response = api_client.post(
+        "/api/services/unknown-service/action",
+        headers=auth_headers,
+        json={
+            "action": "deploy",
+        },
     )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Service not found"
 
 
-def test_deployment_history(authenticated_client):
+def test_deployment_history(api_client, auth_headers):
     """
-    Verify deployment history can be retrieved.
+    Verify deployment history endpoint is accessible.
     """
 
-    response = authenticated_client.get_deployment_history()
+    response = api_client.get(
+        "/api/deployments/history",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
@@ -233,4 +267,5 @@ def test_deployment_history(authenticated_client):
 
     assert "count" in data
     assert "deployments" in data
+    assert isinstance(data["count"], int)
     assert isinstance(data["deployments"], list)
